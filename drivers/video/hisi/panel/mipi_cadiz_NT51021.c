@@ -2413,12 +2413,16 @@ static int mipi_liszt_panel_set_backlight(struct platform_device *pdev)
     u8 sony_ipc_bl_level = 0;
     int ret = 0;
     int bias_gpio_status = 0;
-    //app_min_bl
-    const int min_bl = 4;
+    /*
+     * Huawei clamped the level to >= 4 and then added 4, so the panel never
+     * went below 8/255 and the lowest slider setting was still bright in a
+     * dark room. Pass the level through unchanged, down to 1.
+     */
+    const int min_bl = 1;
     //driver_bl
     const int dimming_valve = 30;
     //app_bl - drive_bl = bl_differ;
-    const int bl_differ = 4;
+    const int bl_differ = 0;
 
     char led_page0[2] = {0x83, 0x00};       /* DTYPE_GEN_WRITE2 */
     char led_page1[2] = {0x84, 0x00};       /* DTYPE_GEN_WRITE2 */
@@ -2446,15 +2450,22 @@ static int mipi_liszt_panel_set_backlight(struct platform_device *pdev)
 
     level = hisifd->bl_level;
     old_level = hisifd->backlight.bl_level_old;
-    bl_level_adjust[1] = ( level > (min_bl-1)) ? level : min_bl;
-    //app_bl - drive_bl = bl_differ;
-    bl_level_adjust[1] = (( bl_level_adjust[1] > (255-bl_differ)) ? 255 : (bl_level_adjust[1]+bl_differ));
+    if (level == 0) {
+        /* Screen off: drive the panel backlight fully off. */
+        bl_level_adjust[1] = 0;
+    } else {
+        bl_level_adjust[1] = (level > (u32)(min_bl-1)) ? level : (u32)min_bl;
+        //app_bl - drive_bl = bl_differ;
+        bl_level_adjust[1] = (( bl_level_adjust[1] > (255-bl_differ)) ? 255 : (bl_level_adjust[1]+bl_differ));
+    }
     old_level = ((old_level < (255-bl_differ)) ? (old_level+bl_differ) : 255);
 
     if(hisifd->backlight.bl_level_old != hisifd->bl_level ){
 #ifndef SONY_IPC_BYPASS
     if(lcd_pwm_type == LCD_USE_IPC_PWM){
         sony_ipc_bl_level = (u8)(hisifd->bl_level / 2);
+        if (sony_ipc_bl_level == 0 && hisifd->bl_level > 0)
+            sony_ipc_bl_level = 1;
         cadiz_i2c_write_u16(0x0C28,sony_ipc_bl_level);
         bias_gpio_status = gpio_get_value(gpio_lcd_bias_enable);
         if (!bias_gpio_status){
