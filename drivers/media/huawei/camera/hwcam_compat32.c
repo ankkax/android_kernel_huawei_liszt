@@ -137,8 +137,8 @@ long compat_get_v4l2_format_data(struct v4l2_format *kp, struct v4l2_format32 __
 		ret |= copy_from_user(&kp->fmt.sliced, &up->fmt.sliced, sizeof(struct v4l2_sliced_vbi_format));
 		break;
 	default:
-		printk(KERN_INFO "compat_ioctl32: unexpected VIDIOC_FMT type %d\n",kp->type);
-		ret = -EINVAL;
+		/* Huawei private types (e.g. the metadata stream): copy as is. */
+		ret |= copy_from_user(kp->fmt.raw_data, up->fmt.raw_data, sizeof(up->fmt.raw_data));
 	}
 	return ret;
 }
@@ -170,8 +170,8 @@ long compat_put_v4l2_format_data(struct v4l2_format *kp, struct v4l2_format32 __
 		ret |= copy_to_user(&up->fmt.sliced, &kp->fmt.sliced, sizeof(struct v4l2_sliced_vbi_format));
 		break;
 	default:
-		printk(KERN_INFO "compat_ioctl32: unexpected VIDIOC_FMT type %d\n",kp->type);
-		ret = -EINVAL;
+		/* Huawei private types (e.g. the metadata stream): copy as is. */
+		ret |= copy_to_user(up->fmt.raw_data, kp->fmt.raw_data, sizeof(up->fmt.raw_data));
 	}
 	return ret;
 }

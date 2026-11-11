@@ -184,6 +184,8 @@ static irqreturn_t hisi_csi1_isr(int irq, void *dev_id)
 }
 
 #if !defined(THS_CSI)
+extern bool is_ovisp23_poweron(void);
+
 int hw_csi_enable(csi_index_t csi_index, int csi_lane, int csi_mipi_clk)
 {
 	/*CSI PHY enbale*/
@@ -203,6 +205,17 @@ int hw_csi_enable(csi_index_t csi_index, int csi_lane, int csi_mipi_clk)
 	if(hw_csi_pad.csi_inited[csi_index]) {
 		cam_info("csi  phy has already been enabled.");
 		return ret;
+	}
+
+	/*
+	 * The CSI registers sit inside the ISP block. If the ISP failed to
+	 * power on (for example its firmware is missing), touching them causes
+	 * a synchronous external abort and the whole system resets. Fail the
+	 * request instead.
+	 */
+	if (!is_ovisp23_poweron()) {
+		cam_err("%s: ISP is powered off, not enabling CSI", __func__);
+		return -ENODEV;
 	}
 
 	reg_offset = hw_csi_pad.info.csi_base_offset[csi_index];
