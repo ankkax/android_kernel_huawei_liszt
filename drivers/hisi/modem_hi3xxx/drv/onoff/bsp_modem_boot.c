@@ -139,6 +139,8 @@ ssize_t modem_reset_set(struct device *dev, struct device_attribute *attr, const
 	else if(state == BALONG_MODEM_ON) /* TODO: 是否需要上电，根HIFI什么关系 */
 	{
 		bsp_modem_power_on();
+		/* allow powering it off again (Settings modem switch) */
+		modem_power_off_flag = 0;
 		pr_err("modem power on %d\n", BALONG_MODEM_ON);
 	}
 	else if(state == BALONG_MODEM_RILD_SYS_ERR)

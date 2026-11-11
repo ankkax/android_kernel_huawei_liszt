@@ -107,6 +107,12 @@ static struct of_device_id hisi_noc_match[] = {
 
 
 extern void bsp_modem_error_handler(u32  p1,  void* p2, void* p3, void* p4);
+#ifdef CONFIG_HISI_BALONG_MODEM_HI3XXX
+/* Not part of the released modem sources; only used to log on NoC errors. */
+void __weak bsp_modem_error_handler(u32 p1, void *p2, void *p3, void *p4)
+{
+}
+#endif
 extern void regulator_address_info_list(void);
 
 static irqreturn_t hisi_noc_timeout_irq_handler(int irq, void *data)
