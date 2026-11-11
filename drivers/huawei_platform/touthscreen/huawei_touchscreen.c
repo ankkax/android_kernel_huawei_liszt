@@ -1442,11 +1442,10 @@ static ssize_t ts_easy_wakeup_gesture_store(struct device *dev,
 		ret = -EBUSY;
 		goto out;
 	}
-	if (palm_info->status != TS_ACTION_SUCCESS) {
-		TS_LOG_ERR("action failed\n");
-		ret = -EIO;
-		goto out;
-	}
+	/* Chips without palm-cover support (Wacom) fail this step; the
+	 * gesture mode itself is already set above. */
+	if (palm_info->status != TS_ACTION_SUCCESS)
+		TS_LOG_INFO("palm switch not supported\n");
 	ret = size;
 out:
 	if (palm_info)
@@ -2285,6 +2284,8 @@ void send_up_msg_in_resume(void)
 	return;
 }
 
+static bool g_ts_irq_wake;	/* irq wake enabled for gesture mode */
+
 static int ts_power_control(int irq_id,
 	struct ts_cmd_node *in_cmd, struct ts_cmd_node *out_cmd)
 {
@@ -2340,6 +2341,8 @@ static int ts_power_control(int irq_id,
 			if (dev->ops->chip_suspend)
 				error = dev->ops->chip_suspend();
 			enable_irq(irq_id);
+			if (!enable_irq_wake(irq_id))
+				g_ts_irq_wake = true;
 			out_cmd->command = TS_WAKEUP_GESTURE_ENABLE;
 			out_cmd->cmd_param.prv_params = (void *)&g_ts_data.feature_info.wakeup_gesture_enable_info;
 			break;
@@ -2350,6 +2353,10 @@ static int ts_power_control(int irq_id,
 			break;
 		case TS_RESUME_DEVICE:	 	/*exit easy-wakeup mode and restore sth*/
 			disable_irq(irq_id);
+			if (g_ts_irq_wake) {
+				disable_irq_wake(irq_id);
+				g_ts_irq_wake = false;
+			}
 			if (dev->ops->chip_resume)
 				error = dev->ops->chip_resume();
 			break;

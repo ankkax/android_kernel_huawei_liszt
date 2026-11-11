@@ -150,6 +150,81 @@ int get_tp_color(u8 *color)
 }
 EXPORT_SYMBOL(get_tp_color);
 
+/*
+ * Double tap to wake. With easy_wakeup_gesture set (power HAL, Settings >
+ * Display > Tap to wake) the controller stays powered while the screen is
+ * off; touches are not reported, and two short taps close together send
+ * KEY_WAKEUP.
+ */
+#define DT2W_TAP_MAX_MS		300	/* longest touch that counts as a tap */
+#define DT2W_GAP_MAX_MS		450	/* lift of tap 1 to touch of tap 2 */
+#define DT2W_DIST_MAX		200	/* px between the two taps */
+static bool dt2w_active;
+static bool dt2w_kept_on;
+static struct {
+	bool down;
+	bool have_tap;
+	unsigned long down_at, up_at;
+	int x, y, tap_x, tap_y;
+} dt2w;
+
+static void dt2w_reset(void)
+{
+	memset(&dt2w, 0, sizeof(dt2w));
+}
+
+static void dt2w_touch(struct wacom_i2c *wac_i2c, u8 *data)
+{
+	struct input_dev *input = wac_i2c->input;
+	int fingers = data[4];
+	int tsw = data[5] & 0x01;
+	int x, y, tmp;
+	unsigned long now = jiffies;
+
+	if (fingers > 1) {		/* several fingers: not a tap */
+		dt2w_reset();
+		return;
+	}
+	if (fingers == 0)
+		tsw = 0;
+
+	x = le16_to_cpup((__le16 *)&data[8]);
+	y = le16_to_cpup((__le16 *)&data[10]);
+	tmp = x; x = y; y = tmp;
+	x = REPORT_ABS_X_MAX - (int)(x * REPORT_ABS_X_MAX) / WACOM_ABS_X_MAX;
+	y = (int)(y * REPORT_ABS_Y_MAX) / WACOM_ABS_Y_MAX;
+
+	if (tsw && !dt2w.down) {
+		dt2w.down = true;
+		dt2w.down_at = now;
+		dt2w.x = x;
+		dt2w.y = y;
+		if (dt2w.have_tap &&
+		    time_before(now, dt2w.up_at + msecs_to_jiffies(DT2W_GAP_MAX_MS)) &&
+		    abs(x - dt2w.tap_x) < DT2W_DIST_MAX &&
+		    abs(y - dt2w.tap_y) < DT2W_DIST_MAX) {
+			TS_LOG_INFO("dt2w: double tap, waking\n");
+			dt2w_reset();
+			dt2w.down = true;	/* ignore the rest of this touch */
+			dt2w.down_at = now - msecs_to_jiffies(DT2W_TAP_MAX_MS + 1);
+			input_report_key(input, KEY_WAKEUP, 1);
+			input_sync(input);
+			input_report_key(input, KEY_WAKEUP, 0);
+			input_sync(input);
+		}
+	} else if (!tsw && dt2w.down) {
+		dt2w.down = false;
+		if (time_before(now, dt2w.down_at + msecs_to_jiffies(DT2W_TAP_MAX_MS))) {
+			dt2w.have_tap = true;
+			dt2w.up_at = now;
+			dt2w.tap_x = dt2w.x;
+			dt2w.tap_y = dt2w.y;
+		} else {
+			dt2w.have_tap = false;
+		}
+	}
+}
+
 static int wacom_suspend(void)
 {
 	struct input_dev *input = wac_data->input;
@@ -159,6 +234,13 @@ static int wacom_suspend(void)
 		input_sync(input);
 	}
 
+	if (wac_data->wacom_chip_data->easy_wakeup_info.sleep_mode == TS_GESTURE_MODE) {
+		TS_LOG_INFO("wacom keep power on for double tap to wake\n");
+		dt2w_reset();
+		dt2w_kept_on = true;
+		dt2w_active = true;
+		return NO_ERR;
+	}
 	if(wacom_power_hold == 1){
 		TS_LOG_INFO("wacom keep power on\n");
 		return NO_ERR;
@@ -169,6 +251,11 @@ static int wacom_suspend(void)
 
 static int wacom_resume(void)
 {
+	dt2w_active = false;
+	if (dt2w_kept_on) {	/* never powered off: nothing to restore */
+		dt2w_kept_on = false;
+		return NO_ERR;
+	}
 	wacom_power_on();
 	wacom_gpio_reset();
 	msleep(300);
@@ -885,6 +972,7 @@ static int wacom_input_config(struct input_dev *input)
       __set_bit(INPUT_PROP_DIRECT, input->propbit);
 
 	input_set_capability(input, EV_MSC, MSC_SERIAL);
+	input_set_capability(input, EV_KEY, KEY_WAKEUP);	/* double tap to wake */
 	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, REPORT_ABS_Y_MAX, 0, 0);
 	input_set_abs_params(input, ABS_MT_POSITION_X, 0, REPORT_ABS_X_MAX, 0, 0);
 	input_set_abs_params(input, ABS_MT_TRACKING_ID, 0, 15, 0, 0);
@@ -1020,6 +1108,13 @@ static int wacom_irq_bottom_half(struct ts_cmd_node *in_cmd, struct ts_cmd_node 
 	if (retval < 0) {
 		TS_LOG_ERR("wacom report data error: %d\n", retval);
 		return retval;
+	}
+
+	if (dt2w_active) {
+		if (data[2] == 0x0c)
+			dt2w_touch(wac_data, data);
+		out_cmd->command = TS_INVAILD_CMD;
+		return NO_ERR;
 	}
 
 	if (data[2] ==  0x06)
