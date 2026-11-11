@@ -1162,7 +1162,7 @@ void rand_initialize_disk(struct gendisk *disk)
 }
 #endif
 
-static ssize_t
+static ssize_t __maybe_unused
 _random_read(int nonblock, char __user *buf, size_t nbytes)
 {
 	ssize_t n, retval = 0, count = 0;
@@ -1219,10 +1219,15 @@ _random_read(int nonblock, char __user *buf, size_t nbytes)
 	return (count ? count : retval);
 }
 
+/*
+ * /dev/random never blocks, like Linux 5.6+: this tablet has no hardware RNG
+ * wired to the pool and entropy_avail sits near 0, so readers (e.g. ffmpeg in
+ * video apps) hung for minutes. Serve it from the nonblocking pool instead.
+ */
 static ssize_t
 random_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
-	return _random_read(file->f_flags & O_NONBLOCK, buf, nbytes);
+	return extract_entropy_user(&nonblocking_pool, buf, nbytes);
 }
 
 static ssize_t
@@ -1238,9 +1243,7 @@ random_poll(struct file *file, poll_table * wait)
 
 	poll_wait(file, &random_read_wait, wait);
 	poll_wait(file, &random_write_wait, wait);
-	mask = 0;
-	if (input_pool.entropy_count >= random_read_wakeup_thresh)
-		mask |= POLLIN | POLLRDNORM;
+	mask = POLLIN | POLLRDNORM;	/* reads never block, see random_read */
 	if (input_pool.entropy_count < random_write_wakeup_thresh)
 		mask |= POLLOUT | POLLWRNORM;
 	return mask;
@@ -1360,9 +1363,7 @@ SYSCALL_DEFINE3(getrandom, char __user *, buf, size_t, count,
 	if (count > INT_MAX)
 		count = INT_MAX;
 
-	if (flags & GRND_RANDOM)
-		return _random_read(flags & GRND_NONBLOCK, buf, count);
-
+	/* GRND_RANDOM is served like the default pool (Linux 5.6+ behaviour). */
 	if (unlikely(nonblocking_pool.initialized == 0)) {
 		if (flags & GRND_NONBLOCK)
 			return -EAGAIN;
