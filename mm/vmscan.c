@@ -1839,8 +1839,11 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	/*
 	 * There is enough inactive page cache, do not reclaim
 	 * anything from the anonymous working set right now.
+	 * Swappiness above 100 (backported from Linux 5.8) means swap
+	 * (zram) is cheaper than refaulting file pages, so keep
+	 * balancing anon against file instead.
 	 */
-	if (!inactive_file_is_low(lruvec)) {
+	if (!inactive_file_is_low(lruvec) && vmscan_swappiness(sc) <= 100) {
 		scan_balance = SCAN_FILE;
 		goto out;
 	}
@@ -1853,6 +1856,8 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	 */
 	anon_prio = vmscan_swappiness(sc);
 	file_prio = 200 - anon_prio;
+	if (!file_prio)
+		file_prio = 1;	/* never stop reclaiming cache completely */
 
 	/*
 	 * OK, so we have swap space and a fair amount of page cache
