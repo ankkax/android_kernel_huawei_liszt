@@ -1787,23 +1787,34 @@ static int sony_cadiz_change_pic_state(int state)
 }
 
 
+/*
+ * Set once the Cadiz chip has failed a whole reset check. On some units it
+ * never answers on I2C; waiting 3 x 100 ms for it on every screen-on then
+ * only delays wake-up (and fingerprint unlock). After a failed check, later
+ * power-ons try once without waiting; one good answer restores the retries.
+ */
+static bool g_cadiz_unresponsive;
+
 static int sony_cadiz_check_reset_status(void)
 {
     int ret = 0;
     u8 value = 0;
     int i = 0;
+    int tries = g_cadiz_unresponsive ? 1 : 3;
     ret = cadiz_i2c_write_u16(0x0830,0x00);
     //check reg 0x0207 is 0x0040.
-    for(i = 0;i < 3; i++){
+    for(i = 0;i < tries; i++){
         ret = cadiz_i2c_read_u16(0x0207,&value);
         if(ret < 0 || value != 0x40){
             HISI_FB_INFO("[%s]:ret = 0x%x,value = 0x%x,i = %d\n", __FUNCTION__, ret, value,i);
-            mdelay(100);
+            if (i + 1 < tries)
+                mdelay(100);
             continue;
         }else{
             break;
         }
     }
+    g_cadiz_unresponsive = (i == tries);
     return ret;
 }
 
