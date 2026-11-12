@@ -11,6 +11,7 @@
 *
 */
 
+#include <linux/moduleparam.h>
 #include "hisi_overlay_utils.h"
 
 /* rptb gen pool */
@@ -4799,6 +4800,49 @@ int hisi_dss_scf_write_coefs(struct hisi_fb_data_type *hisifd,
 	return 0;
 }
 
+/*
+ * Vertical upscale sharpness, 0..100. The stock vertical upscale filter is much
+ * softer than the horizontal one, so text looks blurrier in one direction when
+ * the screen is rendered below native resolution and scaled up. 0 keeps the
+ * stock vertical filter, 100 matches the horizontal filter. Applied the next
+ * time the coefficients load (screen off and on).
+ */
+static int scf_vsharp = 50;
+module_param(scf_vsharp, int, 0644);
+MODULE_PARM_DESC(scf_vsharp, "vertical upscale sharpness 0 (stock) .. 100 (as horizontal)");
+
+static int g_y_coef_tuned[PHASE_NUM][TAP5];
+
+static void hisi_dss_scf_tune_y_coef(void)
+{
+	int s = clamp(scf_vsharp, 0, 100);
+	int r, k, i, sum;
+	int v[TAP5];
+	const int *h;
+
+	memcpy(g_y_coef_tuned, Y_COEF, sizeof(g_y_coef_tuned));
+	/*
+	 * Rows 33..65 are the upscale phases. Vertical row 33+k is centred like
+	 * the mirror image of horizontal row 65-k, shifted by one tap; the 6th
+	 * horizontal tap folds into the nearest vertical end tap.
+	 */
+	for (k = 0; k <= 32; k++) {
+		r = 33 + k;
+		h = H0_Y_COEF[65 - k];
+		for (i = 0; i < TAP5; i++)
+			v[i] = h[4 - i];
+		v[0] += h[5];
+		sum = 0;
+		for (i = 0; i < TAP5; i++) {
+			g_y_coef_tuned[r][i] = Y_COEF[r][i] +
+				DIV_ROUND_CLOSEST((v[i] - Y_COEF[r][i]) * s, 100);
+			sum += g_y_coef_tuned[r][i];
+		}
+		/* keep unity gain (1024) */
+		g_y_coef_tuned[r][k < 16 ? 1 : 2] += 1024 - sum;
+	}
+}
+
 int hisi_dss_scf_load_filter_coef(struct hisi_fb_data_type *hisifd, char __iomem *scf_base)
 {
 	char __iomem *h0_y_addr = NULL;
@@ -4817,7 +4861,8 @@ int hisi_dss_scf_load_filter_coef(struct hisi_fb_data_type *hisifd, char __iomem
 		HISI_FB_ERR("Error to write H0_Y_COEF coefficients.\n");
 	}
 
-	ret = hisi_dss_scf_write_coefs(hisifd, y_addr, (const int **)Y_COEF, PHASE_NUM, TAP5);
+	hisi_dss_scf_tune_y_coef();
+	ret = hisi_dss_scf_write_coefs(hisifd, y_addr, (const int **)g_y_coef_tuned, PHASE_NUM, TAP5);
 	if (ret < 0) {
 		HISI_FB_ERR("Error to write Y_COEF coefficients.\n");
 	}
