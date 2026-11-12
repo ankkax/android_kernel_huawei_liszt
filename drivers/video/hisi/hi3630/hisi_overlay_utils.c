@@ -4807,7 +4807,7 @@ int hisi_dss_scf_write_coefs(struct hisi_fb_data_type *hisifd,
  * stock vertical filter, 100 matches the horizontal filter. Applied the next
  * time the coefficients load (screen off and on).
  */
-static int scf_vsharp = 50;
+static int scf_vsharp = 25;
 module_param(scf_vsharp, int, 0644);
 MODULE_PARM_DESC(scf_vsharp, "vertical upscale sharpness 0 (stock) .. 100 (as horizontal)");
 
