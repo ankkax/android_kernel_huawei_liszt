@@ -134,3 +134,6 @@ int ak8789_input_register(struct ak8789_data *data);
 void ak8789_input_unregister(struct ak8789_data *data);
 #endif
 int ak8789_report_data(void *data, packet_data pdata);
+#ifdef HALL_DATA_REPORT_INPUTHUB
+int ak8789_lid_register(packet_data pdata);
+#endif

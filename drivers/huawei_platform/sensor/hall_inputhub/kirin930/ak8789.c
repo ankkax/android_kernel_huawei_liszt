@@ -718,6 +718,14 @@ static int ak8789_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, data);
 #ifdef HALL_DATA_REPORT_INPUTHUB
 	data_ak8789 = data;
+	{
+		packet_data lid = 0;
+		struct hall_device *d;
+
+		list_for_each_entry(d, &data->head, list)
+			lid |= ak8789_get_data(d) << (d->hall_id << 1);
+		ak8789_lid_register(lid);
+	}
 #endif
 
 	hwlog_info("ak8789 probe success.\n");
