@@ -11,6 +11,7 @@
 *
 */
 
+#include <linux/moduleparam.h>
 #include "hisi_fb.h"
 #include <linux/huawei/hisi_adc.h>
 #include <linux/hisi/hw_cmdline_parse.h>
@@ -1795,19 +1796,29 @@ static int sony_cadiz_change_pic_state(int state)
  */
 static bool g_cadiz_unresponsive;
 
+/*
+ * The skip is only enabled from Android (init writes 1 at boot). The 300 ms
+ * wait also lets the panel settle before display-on; without it the panel
+ * briefly shows its stale memory (white area, boot logo). Android hides that
+ * because the backlight comes on after the first frame, but recovery turns
+ * the backlight on at once, so recovery keeps the full wait.
+ */
+static int cadiz_fast;
+module_param(cadiz_fast, int, 0644);
+
 static int sony_cadiz_check_reset_status(void)
 {
     int ret = 0;
     u8 value = 0;
     int i = 0;
-    int tries = g_cadiz_unresponsive ? 1 : 3;
+    int tries = (cadiz_fast && g_cadiz_unresponsive) ? 1 : 3;
     ret = cadiz_i2c_write_u16(0x0830,0x00);
     //check reg 0x0207 is 0x0040.
     for(i = 0;i < tries; i++){
         ret = cadiz_i2c_read_u16(0x0207,&value);
         if(ret < 0 || value != 0x40){
             HISI_FB_INFO("[%s]:ret = 0x%x,value = 0x%x,i = %d\n", __FUNCTION__, ret, value,i);
-            if (i + 1 < tries)
+            if (!cadiz_fast || i + 1 < tries)
                 mdelay(100);
             continue;
         }else{
