@@ -1902,6 +1902,15 @@ void ts_thread_stop_notify(void)
 }
 
 #if defined(CONFIG_FB)
+/*
+ * Set when the blank path has queued TS_SUSPEND_DEVICE without waiting for it.
+ * A fast unblank used to poll the state for 0.5 s waiting for that suspend to
+ * run; if the queue was slower it gave up without resuming, the suspend then
+ * ran and touch stayed off with the screen on. With this flag the resume is
+ * queued straight behind the pending suspend instead (the queue is FIFO).
+ */
+static atomic_t ts_suspend_pending = ATOMIC_INIT(0);
+
 static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
 {
 	int error = NO_ERR;
@@ -1931,7 +1940,9 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 			case FB_EARLY_EVENT_BLANK:
 				while(1) {
 					ts_state = atomic_read(&g_ts_data.state);
-					if ((TS_SLEEP == ts_state) || (TS_WORK_IN_SLEEP == ts_state)) {
+					if ((TS_SLEEP == ts_state) || (TS_WORK_IN_SLEEP == ts_state)
+							|| atomic_xchg(&ts_suspend_pending, 0)) {
+						atomic_set(&ts_suspend_pending, 0);
 						error = ts_power_control_notify(TS_RESUME_DEVICE, SHORT_SYNC_TIMEOUT);		/*touch power on*/
 						if (error)
 							TS_LOG_ERR("ts resume device err\n");
@@ -1986,9 +1997,12 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 				while(1) {
 					ts_state = atomic_read(&g_ts_data.state);
 					if ((TS_WORK == ts_state) || (TS_WORK_IN_SLEEP == ts_state)) {
+						atomic_set(&ts_suspend_pending, 1);
 						error = ts_power_control_notify(TS_SUSPEND_DEVICE, NO_SYNC_TIMEOUT);	/*touch power off*/
-						if (error)
+						if (error) {
+							atomic_set(&ts_suspend_pending, 0);
 							TS_LOG_ERR("ts before suspend err\n");
+						}
 						break;
 					} else {
 						msleep(TS_FB_WAIT_TIME);
